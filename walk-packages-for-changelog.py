@@ -23,6 +23,7 @@
 # this fact is noted and then printed to stdout at the end.
 
 import argparse
+import bisect
 import os
 import re
 import subprocess
@@ -31,6 +32,14 @@ import sys
 import lxml.etree
 import yaml
 
+
+class Package:
+    def __init__(self, name, dirpath):
+        self.name = name
+        self.dirpath = dirpath
+
+    def __lt__(self, other):
+        return self.name < other.name
 
 def get_repo_path_from_package_path(package_path):
     curpath = os.path.realpath(package_path)
@@ -339,11 +348,7 @@ def main():
         outfp.write('.. contents:: Table of Contents\n')
         outfp.write('   :local:\n\n')
 
-    # Walk the entire source_path passed in by the user, looking for all of the
-    # package.xml files.  For each of them we parse the package.xml, and go
-    # looking for changelog.
-
-    packages_with_no_changelog = []
+    packages = []
     for (dirpath, dirnames, filenames) in os.walk(args.source_path):
         if 'package.xml' not in filenames:
             continue
@@ -356,38 +361,46 @@ def main():
             print('Odd, package has no name; skipping')
             continue
 
-        changelog = os.path.join(dirpath, 'CHANGELOG.rst')
+        bisect.insort_left(packages, Package(package_name, dirpath))
+
+    # Walk the entire source_path passed in by the user, looking for all of the
+    # package.xml files.  For each of them we parse the package.xml, and go
+    # looking for changelog.
+
+    packages_with_no_changelog = []
+    for package in packages:
+        changelog = os.path.join(package.dirpath, 'CHANGELOG.rst')
         if not os.path.exists(changelog):
-            packages_with_no_changelog.append(package_name)
+            packages_with_no_changelog.append(package.name)
             continue
 
-        repo_path = get_repo_path_from_package_path(dirpath)
+        repo_path = get_repo_path_from_package_path(package.dirpath)
 
         old_version = get_old_version(repo_path, old_repo_versions)
         if old_version is None:
-            packages_with_no_changelog.append(package_name)
+            packages_with_no_changelog.append(package.name)
             continue
 
-        origin_url = get_origin_url(dirpath)
+        origin_url = get_origin_url(package.dirpath)
 
-        current_branch = get_current_branch(dirpath)
+        current_branch = get_current_branch(package.dirpath)
 
-        cooked_changelog = get_changelog(dirpath, old_version)
+        cooked_changelog = get_changelog(package.dirpath, old_version)
         if cooked_changelog is None:
-            packages_with_no_changelog.append(package_name)
+            packages_with_no_changelog.append(package.name)
             continue
 
-        header = 'Changelog for package '
+        header = ''
         if origin_url and origin_url.startswith('https://github.com'):
             if origin_url.endswith('.git'):
                 origin_url = origin_url[:-4]
             url_path = '/'
-            if len(dirpath) != len(repo_path):
-                url_path = dirpath[len(repo_path):]
+            if len(package.dirpath) != len(repo_path):
+                url_path = package.dirpath[len(repo_path):]
             url = remove_duplicate_slashes('%s/tree/%s/%s/CHANGELOG.rst' % (origin_url, current_branch, url_path))
-            header += '`%s <%s>`__' % (package_name, url)
+            header += '`%s <%s>`__' % (package.name, url)
         else:
-            header += package_name
+            header += package.name
 
         with open(args.output_file, 'a+') as outfp:
             outfp.write('^'*len(header) + '\n')
