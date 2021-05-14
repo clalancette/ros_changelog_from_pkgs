@@ -350,6 +350,8 @@ def main():
 
     packages = []
     for (dirpath, dirnames, filenames) in os.walk(args.source_path):
+        dirpath = os.path.abspath(dirpath)
+
         if 'package.xml' not in filenames:
             continue
 
