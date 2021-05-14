@@ -394,13 +394,20 @@ def main():
         all_contributors.extend(contributors)
 
         header = ''
-        if origin_url and origin_url.startswith('https://github.com'):
+        url = ''
+        if origin_url:
             if origin_url.endswith('.git'):
                 origin_url = origin_url[:-4]
             url_path = '/'
             if len(package.dirpath) != len(repo_path):
                 url_path = package.dirpath[len(repo_path):]
-            url = remove_duplicate_slashes('%s/tree/%s/%s/CHANGELOG.rst' % (origin_url, current_branch, url_path))
+
+            if origin_url.startswith('https://github.com'):
+                url = origin_url + remove_duplicate_slashes('/tree/%s/%s/CHANGELOG.rst' % (current_branch, url_path))
+            elif origin_url.startswith('https://gitlab.com'):
+                url = origin_url + remove_duplicate_slashes('/-/blob/%s/%s/CHANGELOG.rst' % (current_branch, url_path))
+
+        if url:
             header += '`%s <%s>`__' % (package.name, url)
         else:
             header += package.name
