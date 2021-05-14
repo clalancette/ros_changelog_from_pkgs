@@ -243,7 +243,7 @@ def get_changelog(dirpath, old_version):
     output,err = p.communicate()
     rc = p.returncode
     if rc != 0:
-        return None
+        return None, None
 
     # The output from subprocess.Popen.communicate() is a bytestring, so
     # we first need to decode that into utf-8
@@ -310,14 +310,14 @@ def get_changelog(dirpath, old_version):
     if len(changelog_list) == 0:
         # if there were no entries for a particular package, just skip
         # aggregating anything about it.
-        return None
+        return None, None
 
     if contributors:
         changelog_list.append('* Contributors: ' + ', '.join(sorted(set(contributors))))
     cooked_changelog = '\n'.join(changelog_list)
     cooked_changelog += '\n\n\n'
 
-    return cooked_changelog
+    return cooked_changelog, contributors
 
 def main():
     parser = argparse.ArgumentParser(description='Utility to find and collate CHANGELOGs of packages in a workspace')
@@ -367,6 +367,7 @@ def main():
     # package.xml files.  For each of them we parse the package.xml, and go
     # looking for changelog.
 
+    all_contributors = []
     packages_with_no_changelog = []
     for package in packages:
         changelog = os.path.join(package.dirpath, 'CHANGELOG.rst')
@@ -385,10 +386,12 @@ def main():
 
         current_branch = get_current_branch(package.dirpath)
 
-        cooked_changelog = get_changelog(package.dirpath, old_version)
+        cooked_changelog, contributors = get_changelog(package.dirpath, old_version)
         if cooked_changelog is None:
             packages_with_no_changelog.append(package.name)
             continue
+
+        all_contributors.extend(contributors)
 
         header = ''
         if origin_url and origin_url.startswith('https://github.com'):
@@ -412,6 +415,12 @@ def main():
         print("Packages without a changelog:")
         for package_name in sorted(packages_with_no_changelog):
             print('* [ ] %s' % (package_name))
+
+    if all_contributors:
+        sorted_contrib = sorted(set(all_contributors))
+        print('')
+        print('Thanks to the %d contributors who contributed to this release:' % (len(sorted_contrib)))
+        print('\n'.join(sorted_contrib))
 
     return 0
 
