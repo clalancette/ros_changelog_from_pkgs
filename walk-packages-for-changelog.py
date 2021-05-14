@@ -391,13 +391,19 @@ def main():
             continue
 
         header = ''
-        if origin_url and origin_url.startswith('https://github.com'):
+        from_github = origin_url.startswith('https://github.com')
+        from_gitlab = origin_url.startswith('https://gitlab.com')
+        if origin_url and (from_github or from_gitlab):
             if origin_url.endswith('.git'):
                 origin_url = origin_url[:-4]
             url_path = '/'
             if len(package.dirpath) != len(repo_path):
                 url_path = package.dirpath[len(repo_path):]
-            url = remove_duplicate_slashes('%s/tree/%s/%s/CHANGELOG.rst' % (origin_url, current_branch, url_path))
+            if from_github:
+                url = '%s/tree/%s/%s/CHANGELOG.rst' % (origin_url, current_branch, url_path)
+            elif from_gitlab:
+                url = '%s/-/blob/%s/%s/CHANGELOG.rst' % (origin_url, current_branch, url_path)
+            url = remove_duplicate_slashes(url)
             header += '`%s <%s>`__' % (package.name, url)
         else:
             header += package.name
