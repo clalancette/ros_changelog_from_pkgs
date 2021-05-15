@@ -349,12 +349,27 @@ def main():
         outfp.write('.. contents:: Table of Contents\n')
         outfp.write('   :local:\n\n')
 
-    packages = []
+    # We want to deal with {COLCON,AMENT,CATKIN}_IGNORE files by removing
+    # entire directory trees from our consideration.  To do this, we walk the
+    # given source path, looking for the IGNORE files.  If we see one, we add
+    # it to the skip list and we'll then skip any children that start with that
+    # path.  This works because os.walk is guaranteed to be top-down by default,
+    # where parents always come before their children.
+    directories = []
+    skip_directories = []
     for (dirpath, dirnames, filenames) in os.walk(args.source_path):
-        if 'package.xml' not in filenames:
-            continue
-
         if has_skip_file(dirpath):
+            skip_directories.append(dirpath)
+        else:
+            for skip in skip_directories:
+                if dirpath.startswith(skip):
+                    break
+            else:
+                directories.append(dirpath)
+
+    packages = []
+    for dirpath in directories:
+        if not os.path.exists(os.path.join(dirpath, 'package.xml')):
             continue
 
         package_name = get_package_name_from_xml(dirpath)
