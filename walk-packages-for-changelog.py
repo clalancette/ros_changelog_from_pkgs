@@ -324,7 +324,8 @@ def main():
     parser.add_argument(
         'source_path',
         help='The top-level of the source tree in which to find packages',
-        action='store')
+        action='store',
+        type=os.path.abspath)
     parser.add_argument(
         'since',
         help='The ros2.repos file to generate documentation since',
