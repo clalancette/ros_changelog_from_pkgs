@@ -238,7 +238,7 @@ def get_current_branch(dirpath):
 def get_changelog(dirpath, old_version):
     star_fix_re = re.compile(r'\*\.')
 
-    p = subprocess.Popen(['git', 'diff', '-U0', '--output-indicator-new', ' ', old_version + '..', 'CHANGELOG.rst'],
+    p = subprocess.Popen(['git', 'diff', '-U0', '--output-indicator-new', ' ', 'origin/' + old_version + '..', 'CHANGELOG.rst'],
                          cwd=dirpath, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output,err = p.communicate()
     rc = p.returncode
