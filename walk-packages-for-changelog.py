@@ -66,16 +66,18 @@ def remove_duplicate_slashes(instring):
     return ''.join(outlist)
 
 def get_contrib_from_line(instring):
-    contributors = []
     contrib_match = re.match(r'^\* Contributors: (.*)', instring)
-    if contrib_match:
-        groups = contrib_match.groups()
-        if len(groups) == 1:
-            # OK, we have a list of contributors.  Split this up so
-            # that we can do de-duplication, sorting, etc.
-            s = groups[0].split(',')
-            for contributor in s:
-                contributors.append(contributor.strip())
+    if not contrib_match:
+        return []
+
+    contributors = []
+    groups = contrib_match.groups()
+    if len(groups) == 1:
+        # OK, we have a list of contributors.  Split this up so
+        # that we can do de-duplication, sorting, etc.
+        s = groups[0].split(',')
+        for contributor in s:
+            contributors.append(contributor.strip())
 
     return contributors
 
@@ -284,20 +286,22 @@ def get_changelog(dirpath, old_version):
         if re.match(r' %s \([0-9]{4}-[0-9]{2}-[0-9]{2}\)' % (old_version), line):
             break
 
-        if len(line) > 1:
-            if line[0:2] == ' *':
-                # Flush out the previous buffer
-                if line_buffer:
-                    current_contrib = get_contrib_from_line(line_buffer)
-                    if current_contrib:
-                        contributors.extend(current_contrib)
-                    else:
-                        changelog_list.append(fix_line(line_buffer))
+        if len(line) == 1:
+            continue
 
-                line_buffer = re.sub(star_fix_re, r'\*.', line.lstrip())
-            elif line[0:2] == '  ':
-                if line_buffer:
-                    line_buffer += ' ' + re.sub(star_fix_re, r'\*.', line.lstrip())
+        if line[0:2] == ' *':
+            # Flush out the previous buffer
+            if line_buffer:
+                current_contrib = get_contrib_from_line(line_buffer)
+                if current_contrib:
+                    contributors.extend(current_contrib)
+                else:
+                    changelog_list.append(fix_line(line_buffer))
+
+            line_buffer = re.sub(star_fix_re, r'\*.', line.lstrip())
+        elif line[0:2] == '  ':
+            if line_buffer:
+                line_buffer += ' ' + re.sub(star_fix_re, r'\*.', line.lstrip())
 
     if line_buffer:
         # Flush out the last buffer
