@@ -171,14 +171,6 @@ def fix_line(instring):
 
     return output.rstrip()
 
-def get_old_repo_versions(since):
-    old_repo_versions = {}
-    with open(since, 'r') as infp:
-        old_repos = yaml.safe_load(infp)
-        for repo,info in old_repos['repositories'].items():
-            old_repo_versions[os.path.basename(repo)] = info['version']
-    return old_repo_versions
-
 def get_package_name_from_xml(dirpath):
     lxml_tree = lxml.etree.parse(os.path.join(dirpath, 'package.xml'))
     package_name = ''
@@ -198,22 +190,27 @@ def has_skip_file(dirpath):
 
     return should_skip
 
-def get_old_version(repo_path, old_repo_versions):
-    repo_name = os.path.basename(repo_path)
-    if repo_name in old_repo_versions:
-        # This was a package that existed in Foxy, so get the diff since Foxy
-        old_version = old_repo_versions[repo_name]
-    else:
-        # This is a new package, so get the diff since the beginning of time
-        p = subprocess.Popen(['git', 'rev-list', 'HEAD'], cwd=repo_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        output,err = p.communicate()
-        rc = p.returncode
-        if rc != 0:
-            old_version = None
-        else:
-            old_version = output.decode('utf-8').splitlines()[-1]
+def get_old_version(repo_path, last_commit_hash):
+    # To get the old version, we run the equivalent of:
+    #
+    # git describe --tags --abbrev=0 <hash>
+    p = subprocess.Popen(['git', 'describe', '--tags', '--abbrev=0', last_commit_hash],
+                         cwd=repo_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    output,err = p.communicate()
+    rc = p.returncode
+    if rc != 0:
+        return None
 
-    return old_version
+    # The output from subprocess.Popen.communicate() is a bytestring, so
+    # we first need to decode that into utf-8
+    version_string = output.decode('utf-8').strip()
+
+    # If the output is empty, then there was no release.  This is unlikely, but not
+    # impossible, so just return None; there is no further work to do here
+    if not version_string:
+        return None
+
+    return version_string
 
 def get_origin_url(dirpath):
     p = subprocess.Popen(['git', 'config', '--get', 'remote.origin.url'],
@@ -240,7 +237,7 @@ def get_current_branch(dirpath):
 def get_changelog(dirpath, old_version):
     star_fix_re = re.compile(r'\*\.')
 
-    p = subprocess.Popen(['git', 'diff', '-U0', '--output-indicator-new', ' ', 'origin/' + old_version + '..', 'CHANGELOG.rst'],
+    p = subprocess.Popen(['git', 'diff', '-U0', '--output-indicator-new', ' ', old_version + '..', 'CHANGELOG.rst'],
                          cwd=dirpath, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output,err = p.communicate()
     rc = p.returncode
@@ -323,6 +320,33 @@ def get_changelog(dirpath, old_version):
 
     return cooked_changelog, contributors
 
+def get_last_commit_hash_before_branch(repo_path, since):
+    # To find the last hash, we run the equivalent of:
+    # git log -1 --pretty=oneline --until=2022-04-20
+    p = subprocess.Popen(['git', 'log', '--pretty=oneline', '-1', '--until=' + since],
+                         cwd=repo_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    output,err = p.communicate()
+    rc = p.returncode
+    if rc != 0:
+        return None
+
+    # The output from subprocess.Popen.communicate() is a bytestring, so
+    # we first need to decode that into utf-8
+    hash_string = output.decode('utf-8')
+
+    # If the output is empty, then there have been no changes since the previous branch.
+    # This is unlikely, but not impossible, so just return None; there is no further work
+    # to do here
+    if not hash_string:
+        return None
+
+    split = hash_string.split()
+    if len(split) < 1:
+        # We encountered something we don't understand, so just get out
+        return None
+
+    return split[0]
+
 def main():
     parser = argparse.ArgumentParser(description='Utility to find and collate CHANGELOGs of packages in a workspace')
     parser.add_argument(
@@ -332,7 +356,7 @@ def main():
         type=os.path.abspath)
     parser.add_argument(
         'since',
-        help='The ros2.repos file to generate documentation since',
+        help='The date from which to generate changelogs; this should be the date that the previous release was branched off of rolling',
         action='store')
     parser.add_argument(
         'title',
@@ -343,10 +367,6 @@ def main():
         help='The location in which to write long-form output',
         action='store')
     args = parser.parse_args()
-
-    # Open up the old ros2.repos file, and store a dict of the package_name -> tag
-    # for each package.
-    old_repo_versions = get_old_repo_versions(args.since)
 
     # Clear out the old file that we'll be overwriting
     with open(args.output_file, 'w') as outfp:
@@ -401,14 +421,18 @@ def main():
 
         repo_path = get_repo_path_from_package_path(package.dirpath)
 
-        old_version = get_old_version(repo_path, old_repo_versions)
+        # Get the commit hash on this repository that was the last one since the branch
+        last_commit_hash_before_branch = get_last_commit_hash_before_branch(repo_path, args.since)
+        if last_commit_hash_before_branch is None:
+            packages_with_no_changelog.append(package.name)
+            continue
+
+        old_version = get_old_version(repo_path, last_commit_hash_before_branch)
         if old_version is None:
             packages_with_no_changelog.append(package.name)
             continue
 
         origin_url = get_origin_url(package.dirpath)
-
-        current_branch = get_current_branch(package.dirpath)
 
         cooked_changelog, contributors = get_changelog(package.dirpath, old_version)
         if cooked_changelog is None:
@@ -420,6 +444,8 @@ def main():
         header = ''
         url = ''
         if origin_url:
+            current_branch = get_current_branch(package.dirpath)
+
             if origin_url.endswith('.git'):
                 origin_url = origin_url[:-4]
             url_path = '/'
@@ -428,6 +454,9 @@ def main():
 
             if origin_url.startswith('https://github.com'):
                 url = origin_url + remove_duplicate_slashes('/tree/%s/%s/CHANGELOG.rst' % (current_branch, url_path))
+            elif origin_url.startswith('git@github.com:'):
+                org_repo = origin_url[len('git@github.com:'):]
+                url = 'https://github.com/' + org_repo + remove_duplicate_slashes('/tree/%s/%s/CHANGELOG.rst' % (current_branch, url_path))
             elif origin_url.startswith('https://gitlab.com'):
                 url = origin_url + remove_duplicate_slashes('/-/blob/%s/%s/CHANGELOG.rst' % (current_branch, url_path))
 
@@ -443,7 +472,7 @@ def main():
             outfp.write(cooked_changelog)
 
     if packages_with_no_changelog:
-        print("Packages without a changelog:")
+        print("Packages without a changelog, or no changes since last ROS release:")
         for package_name in sorted(packages_with_no_changelog):
             print('* [ ] %s' % (package_name))
 
