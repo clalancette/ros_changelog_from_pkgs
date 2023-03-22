@@ -335,6 +335,10 @@ def main():
         help='The ros2.repos file to generate documentation since',
         action='store')
     parser.add_argument(
+        'title',
+        help='The title text to put in the header',
+        action='store')
+    parser.add_argument(
         'output_file',
         help='The location in which to write long-form output',
         action='store')
@@ -346,9 +350,9 @@ def main():
 
     # Clear out the old file that we'll be overwriting
     with open(args.output_file, 'w') as outfp:
-        header = 'ROS 2 Iron Irwini Complete Changelog'
-        outfp.write(header + '\n')
-        outfp.write('='*len(header) + '\n\n')
+        page_header = 'ROS 2 ' + args.title + ' Complete Changelog'
+        outfp.write(page_header + '\n')
+        outfp.write('='*len(page_header) + '\n\n')
         outfp.write('This page is a list of the complete changes in all ROS 2 core packages since the previous release.\n\n')
         outfp.write('.. contents:: Table of Contents\n')
         outfp.write('   :local:\n\n')
