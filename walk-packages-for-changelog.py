@@ -14,13 +14,14 @@
 
 # This is a program to generate an exhaustive set of changes in a ROS source
 # tree.  This works by crawling the given source tree, building up a database
-# of packages.  It also looks at an input ros2.repos file, and builds another
-# database of repository names to version numbers.  For each of the packages,
-# it looks at all of the changes to the CHANGELOG.rst file for that package
-# since the earlier ros2.repos file, and collates all of them together into
-# a single set of changes.  All of the collated changelog information is written
-# to the given output_file.  If a repository doesn't have a CHANGELOG.rst file,
-# this fact is noted and then printed to stdout at the end.
+# of packages.  It also figures out the tag in each repository before the "since"
+# date provided on the command-line (which should be the day that the previous
+# release branched off of Rolling).  For each of the packages, it looks at all
+# of the changes to the CHANGELOG.rst file for that package since the last tag,
+# and collates all of them together into a single set of changes.  All of the
+# collated changelog information is written to the given output_file.  If a
+# repository doesn't have a CHANGELOG.rst file, this fact is noted and then printed
+# to stdout at the end.
 
 import argparse
 import bisect
@@ -30,7 +31,6 @@ import subprocess
 import sys
 
 import lxml.etree
-import yaml
 
 
 class Package:
@@ -47,7 +47,7 @@ def get_repo_path_from_package_path(package_path):
         curpath = os.path.realpath(os.path.join(curpath, '..'))
 
     if curpath == '/':
-        raise Exception("Could not find git repository")
+        raise Exception('Could not find git repository')
 
     return curpath
 
@@ -472,7 +472,7 @@ def main():
             outfp.write(cooked_changelog)
 
     if packages_with_no_changelog:
-        print("Packages without a changelog, or no changes since last ROS release:")
+        print('Packages without a changelog, or no changes since last ROS release:')
         for package_name in sorted(packages_with_no_changelog):
             print('* [ ] %s' % (package_name))
 
