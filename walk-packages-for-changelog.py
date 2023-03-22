@@ -346,7 +346,7 @@ def main():
 
     # Clear out the old file that we'll be overwriting
     with open(args.output_file, 'w') as outfp:
-        header = 'ROS 2 Galactic Geochelone Complete Changelog'
+        header = 'ROS 2 Iron Irwini Complete Changelog'
         outfp.write(header + '\n')
         outfp.write('='*len(header) + '\n\n')
         outfp.write('This page is a list of the complete changes in all ROS 2 core packages since the previous release.\n\n')
