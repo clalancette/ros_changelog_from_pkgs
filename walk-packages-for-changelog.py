@@ -347,6 +347,63 @@ def get_last_commit_hash_before_branch(repo_path, since):
 
     return split[0]
 
+def collect_packages(source_path):
+    # We want to deal with {COLCON,AMENT,CATKIN}_IGNORE files by removing
+    # entire directory trees from our consideration.  To do this, we walk the
+    # given source path, looking for the IGNORE files.  If we see one, we add
+    # it to the skip list and we'll then skip any children that start with that
+    # path.  This works because os.walk is guaranteed to be top-down by default,
+    # where parents always come before their children.
+    directories = []
+    skip_directories = []
+    for (dirpath, dirnames, filenames) in os.walk(source_path):
+        if has_skip_file(dirpath):
+            skip_directories.append(dirpath)
+        else:
+            for skip in skip_directories:
+                if dirpath.startswith(skip):
+                    break
+            else:
+                directories.append(dirpath)
+
+    packages = []
+    for dirpath in directories:
+        if not os.path.exists(os.path.join(dirpath, 'package.xml')):
+            continue
+
+        package_name = get_package_name_from_xml(dirpath)
+        if not package_name:
+            print('Odd, package has no name; skipping')
+            continue
+
+        bisect.insort_left(packages, Package(package_name, dirpath))
+
+    return packages
+
+def generate_package_url(dirpath, repo_path):
+    url = ''
+    origin_url = get_origin_url(dirpath)
+    if not origin_url:
+        return url
+
+    current_branch = get_current_branch(dirpath)
+
+    if origin_url.endswith('.git'):
+        origin_url = origin_url[:-4]
+    url_path = '/'
+    if len(dirpath) != len(repo_path):
+        url_path = dirpath[len(repo_path):]
+
+    if origin_url.startswith('https://github.com'):
+        url = origin_url + remove_duplicate_slashes('/tree/%s/%s/CHANGELOG.rst' % (current_branch, url_path))
+    elif origin_url.startswith('git@github.com:'):
+        org_repo = origin_url[len('git@github.com:'):]
+        url = 'https://github.com/' + org_repo + remove_duplicate_slashes('/tree/%s/%s/CHANGELOG.rst' % (current_branch, url_path))
+    elif origin_url.startswith('https://gitlab.com'):
+        url = origin_url + remove_duplicate_slashes('/-/blob/%s/%s/CHANGELOG.rst' % (current_branch, url_path))
+
+    return url
+
 def main():
     parser = argparse.ArgumentParser(description='Utility to find and collate CHANGELOGs of packages in a workspace')
     parser.add_argument(
@@ -377,41 +434,13 @@ def main():
         outfp.write('.. contents:: Table of Contents\n')
         outfp.write('   :local:\n\n')
 
-    # We want to deal with {COLCON,AMENT,CATKIN}_IGNORE files by removing
-    # entire directory trees from our consideration.  To do this, we walk the
-    # given source path, looking for the IGNORE files.  If we see one, we add
-    # it to the skip list and we'll then skip any children that start with that
-    # path.  This works because os.walk is guaranteed to be top-down by default,
-    # where parents always come before their children.
-    directories = []
-    skip_directories = []
-    for (dirpath, dirnames, filenames) in os.walk(args.source_path):
-        if has_skip_file(dirpath):
-            skip_directories.append(dirpath)
-        else:
-            for skip in skip_directories:
-                if dirpath.startswith(skip):
-                    break
-            else:
-                directories.append(dirpath)
-
-    packages = []
-    for dirpath in directories:
-        if not os.path.exists(os.path.join(dirpath, 'package.xml')):
-            continue
-
-        package_name = get_package_name_from_xml(dirpath)
-        if not package_name:
-            print('Odd, package has no name; skipping')
-            continue
-
-        bisect.insort_left(packages, Package(package_name, dirpath))
+    packages = collect_packages(args.source_path)
 
     # Walk the entire source_path passed in by the user, looking for all of the
     # package.xml files.  For each of them we parse the package.xml, and go
     # looking for changelog.
 
-    all_contributors = []
+    all_contributors = set()
     packages_with_no_changelog = []
     for package in packages:
         changelog = os.path.join(package.dirpath, 'CHANGELOG.rst')
@@ -432,34 +461,16 @@ def main():
             packages_with_no_changelog.append(package.name)
             continue
 
-        origin_url = get_origin_url(package.dirpath)
-
         cooked_changelog, contributors = get_changelog(package.dirpath, old_version)
         if cooked_changelog is None:
             packages_with_no_changelog.append(package.name)
             continue
 
-        all_contributors.extend(contributors)
+        all_contributors.update(contributors)
+
+        url = generate_package_url(package.dirpath, repo_path)
 
         header = ''
-        url = ''
-        if origin_url:
-            current_branch = get_current_branch(package.dirpath)
-
-            if origin_url.endswith('.git'):
-                origin_url = origin_url[:-4]
-            url_path = '/'
-            if len(package.dirpath) != len(repo_path):
-                url_path = package.dirpath[len(repo_path):]
-
-            if origin_url.startswith('https://github.com'):
-                url = origin_url + remove_duplicate_slashes('/tree/%s/%s/CHANGELOG.rst' % (current_branch, url_path))
-            elif origin_url.startswith('git@github.com:'):
-                org_repo = origin_url[len('git@github.com:'):]
-                url = 'https://github.com/' + org_repo + remove_duplicate_slashes('/tree/%s/%s/CHANGELOG.rst' % (current_branch, url_path))
-            elif origin_url.startswith('https://gitlab.com'):
-                url = origin_url + remove_duplicate_slashes('/-/blob/%s/%s/CHANGELOG.rst' % (current_branch, url_path))
-
         if url:
             header += '`%s <%s>`__' % (package.name, url)
         else:
@@ -477,13 +488,12 @@ def main():
             print('* [ ] %s' % (package_name))
 
     if all_contributors:
-        sorted_contrib = sorted(set(all_contributors))
+        sorted_contrib = sorted(all_contributors)
         print('')
         print('Thanks to the %d contributors who contributed to this release:' % (len(sorted_contrib)))
         print('\n'.join(sorted_contrib))
 
     return 0
-
 
 if __name__ == '__main__':
     sys.exit(main())
