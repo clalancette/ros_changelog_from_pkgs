@@ -190,8 +190,41 @@ def has_skip_file(dirpath):
 
     return should_skip
 
+def get_first_changelog_version(package_dir_path):
+    # To get the first changelog version CHANGELOG.rst existed in, we run:
+    #
+    # git log --pretty=format:%h --reverse CHANGELOG.rst
+    p = subprocess.Popen(['git', 'log', '--pretty=format:%h', '--reverse', 'CHANGELOG.rst'],
+                         cwd=package_dir_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    output,err = p.communicate()
+    rc = p.returncode
+    if rc != 0:
+        return None
+
+    # The output from subprocess.Popen.communicate() is a bytestring, so
+    # we first need to decode that into utf-8
+    list_of_hashes = output.decode('utf-8').strip().split('\n')
+
+    # We now should have a string list of hashes.  The first one will be the earliest
+    # one that contains the CHANGELOG, so get the hash right before that.
+
+    if not list_of_hashes:
+        return None
+
+    earliest_hash = list_of_hashes[0]
+
+    # TODO(clalancette): This works unless this is the very first commit in the repository
+    p = subprocess.Popen(['git', 'rev-parse', '%s~1' % (earliest_hash)],
+                         cwd=package_dir_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    output,err = p.communicate()
+    rc = p.returncode
+    if rc != 0:
+        return None
+
+    return output.decode('utf-8').strip()
+
 def get_old_version(repo_path, last_commit_hash):
-    # To get the old version, we run the equivalent of:
+    # To get the old version, we run:
     #
     # git describe --tags --abbrev=0 <hash>
     p = subprocess.Popen(['git', 'describe', '--tags', '--abbrev=0', last_commit_hash],
@@ -452,14 +485,20 @@ def main():
 
         # Get the commit hash on this repository that was the last one since the branch
         last_commit_hash_before_branch = get_last_commit_hash_before_branch(repo_path, args.since)
-        if last_commit_hash_before_branch is None:
-            packages_with_no_changelog.append(package.name)
-            continue
 
-        old_version = get_old_version(repo_path, last_commit_hash_before_branch)
-        if old_version is None:
-            packages_with_no_changelog.append(package.name)
-            continue
+        old_version = None
+        if last_commit_hash_before_branch is None:
+            # If we didn't find a commit hash from the last branch, then
+            # presumably this is a new repository.  Set the old version to the
+            # hash corresponding to the first commit where the CHANGELOG.rst
+            # existed in the package.
+            old_version = get_first_changelog_version(package.dirpath)
+        else:
+            old_version = get_old_version(repo_path, last_commit_hash_before_branch)
+            if old_version is None:
+                # There was a last commit hash, but no old version; that is weird
+                packages_with_no_changelog.append(package.name)
+                continue
 
         cooked_changelog, contributors = get_changelog(package.dirpath, old_version)
         if cooked_changelog is None:
